@@ -1,0 +1,170 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: client-timesheet-app
+
+jobs:
+  build-and-push:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    
+    outputs:
+      image_tag: ${{ steps.build.outputs.image_tag }}
+
+    steps:
+      - name: Checkout hosting repo
+        uses: actions/checkout@v4
+
+      - name: Checkout application repo
+        uses: actions/checkout@v4
+        with:
+          repository: Cognition-Partner-Workshops/client-timesheet-app
+          path: app
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push image to Amazon ECR
+        id: build
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          # Copy docker files to app directory for build context
+          cp -r docker/* app/
+          mkdir -p app/docker/overrides
+          cp -r docker/overrides/* app/docker/overrides/
+          
+          # Build and push
+          cd app
+          docker build -f docker/Dockerfile -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          
+          echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+  deploy:
+    name: Deploy to EC2
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get EC2 instance IP
+        id: get-ip
+        run: |
+          INSTANCE_IP=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=client-timesheet-app" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' \
+            --output text)
+          echo "instance_ip=$INSTANCE_IP" >> $GITHUB_OUTPUT
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ steps.get-ip.outputs.instance_ip }} >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Deploy to EC2
+        env:
+          INSTANCE_IP: ${{ steps.get-ip.outputs.instance_ip }}
+        run: |
+          ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 ec2-user@$INSTANCE_IP << 'EOF'
+            sudo /opt/app/deploy.sh
+          EOF
+
+      - name: Health check
+        env:
+          INSTANCE_IP: ${{ steps.get-ip.outputs.instance_ip }}
+        run: |
+          echo "Waiting for application to start..."
+          sleep 10
+          
+          for i in {1..30}; do
+            if curl -sf http://$INSTANCE_IP/health > /dev/null 2>&1; then
+              echo "Application is healthy!"
+              curl -s http://$INSTANCE_IP/health
+              exit 0
+            fi
+            echo "Attempt $i: Waiting for application..."
+            sleep 5
+          done
+          
+          echo "Health check failed after 30 attempts"
+          exit 1
+
+  terraform-plan:
+    name: Terraform Plan (Infrastructure Changes Only)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0
+
+      - name: Terraform Init
+        working-directory: terraform/infrastructure
+        run: terraform init
+
+      - name: Terraform Plan
+        working-directory: terraform/infrastructure
+        env:
+          TF_VAR_ssh_public_key: ${{ secrets.EC2_SSH_PUBLIC_KEY }}
+          TF_VAR_ecr_repository_url: ${{ secrets.ECR_REPOSITORY_URL }}
+        run: terraform plan -no-color
