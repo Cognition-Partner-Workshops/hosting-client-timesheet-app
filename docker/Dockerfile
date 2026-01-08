@@ -12,6 +12,10 @@ RUN npm ci
 # Copy frontend source
 COPY frontend/ ./
 
+# Copy frontend overrides (dashboard page and API client)
+COPY docker/overrides/frontend/src/pages/DashboardPage.tsx ./src/pages/DashboardPage.tsx
+COPY docker/overrides/frontend/src/api/client.ts ./src/api/client.ts
+
 # Build frontend
 RUN npm run build
 
@@ -46,6 +50,7 @@ COPY backend/package.json ./
 # Copy production overrides (modified server.js and database init for file-based SQLite)
 COPY docker/overrides/server.js ./src/server.js
 COPY docker/overrides/database/init.js ./src/database/init.js
+COPY docker/overrides/routes/dashboard.js ./src/routes/dashboard.js
 
 # Copy built frontend to be served by backend
 COPY --from=frontend-builder /app/frontend/dist ./public
