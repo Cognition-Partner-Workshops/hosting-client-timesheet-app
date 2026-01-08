@@ -130,9 +130,9 @@ resource "aws_iam_role_policy" "ecr_policy" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "ECRGetAuthToken"
-        Effect = "Allow"
-        Action = ["ecr:GetAuthorizationToken"]
+        Sid      = "ECRGetAuthToken"
+        Effect   = "Allow"
+        Action   = ["ecr:GetAuthorizationToken"]
         Resource = "*"
       },
       {
@@ -163,8 +163,8 @@ resource "aws_iam_instance_profile" "ec2_profile" {
 # SSH key pair removed - using SSM Session Manager instead
 
 resource "aws_instance" "app" {
-  ami                    = data.aws_ami.amazon_linux_2023.id
-  instance_type          = var.instance_type
+  ami           = data.aws_ami.amazon_linux_2023.id
+  instance_type = var.instance_type
   # No SSH key - using SSM Session Manager for access
   vpc_security_group_ids = [aws_security_group.app.id]
   subnet_id              = aws_default_subnet.default.id
