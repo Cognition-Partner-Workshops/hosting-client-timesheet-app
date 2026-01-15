@@ -12,6 +12,12 @@ RUN npm ci
 # Copy frontend source
 COPY frontend/ ./
 
+# Copy frontend overrides for mobile auth login
+COPY docker/overrides/frontend/src/pages/LoginPage.tsx ./src/pages/LoginPage.tsx
+COPY docker/overrides/frontend/src/api/client.ts ./src/api/client.ts
+COPY docker/overrides/frontend/src/types/api.ts ./src/types/api.ts
+COPY docker/overrides/frontend/src/contexts/AuthContext.tsx ./src/contexts/AuthContext.tsx
+
 # Build frontend
 RUN npm run build
 
@@ -46,6 +52,8 @@ COPY backend/package.json ./
 # Copy production overrides (modified server.js and database init for file-based SQLite)
 COPY docker/overrides/server.js ./src/server.js
 COPY docker/overrides/database/init.js ./src/database/init.js
+COPY docker/overrides/routes/auth.js ./src/routes/auth.js
+COPY docker/overrides/validation/schemas.js ./src/validation/schemas.js
 
 # Copy built frontend to be served by backend
 COPY --from=frontend-builder /app/frontend/dist ./public

@@ -37,10 +37,13 @@ async function initializeDatabase() {
       // Enable foreign keys
       database.run('PRAGMA foreign_keys = ON');
       
-      // Create users table
+      // Create users table with mobile number support
       database.run(`
         CREATE TABLE IF NOT EXISTS users (
           email TEXT PRIMARY KEY,
+          mobile_number TEXT UNIQUE,
+          auth_code TEXT,
+          auth_code_expires_at DATETIME,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
       `);
@@ -79,6 +82,7 @@ async function initializeDatabase() {
       database.run(`CREATE INDEX IF NOT EXISTS idx_work_entries_client_id ON work_entries (client_id)`);
       database.run(`CREATE INDEX IF NOT EXISTS idx_work_entries_user_email ON work_entries (user_email)`);
       database.run(`CREATE INDEX IF NOT EXISTS idx_work_entries_date ON work_entries (date)`);
+      database.run(`CREATE INDEX IF NOT EXISTS idx_users_mobile_number ON users (mobile_number)`);
 
       console.log('Database tables created successfully');
       resolve();
