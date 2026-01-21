@@ -10,7 +10,7 @@ const clientRoutes = require('./routes/clients');
 const workEntryRoutes = require('./routes/workEntries');
 const reportRoutes = require('./routes/reports');
 
-const { initializeDatabase } = require('./database/init');
+const { initializeDatabase, cleanupExpiredSessions, getSessionTimeoutMs, getSessionInactivityTimeoutMs } = require('./database/init');
 const { errorHandler } = require('./middleware/errorHandler');
 
 const app = express();
@@ -89,10 +89,30 @@ if (process.env.NODE_ENV === 'production') {
 async function startServer() {
   try {
     await initializeDatabase();
+    
+    // Start periodic session cleanup (every 5 minutes)
+    const SESSION_CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes
+    setInterval(() => {
+      cleanupExpiredSessions((err, deletedCount) => {
+        if (err) {
+          console.error('SESSION_CLEANUP_FAILED:', { error: err.message });
+        }
+      });
+    }, SESSION_CLEANUP_INTERVAL);
+    
+    // Run initial cleanup on startup
+    cleanupExpiredSessions((err, deletedCount) => {
+      if (err) {
+        console.error('INITIAL_SESSION_CLEANUP_FAILED:', { error: err.message });
+      }
+    });
+    
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`Server running on port ${PORT}`);
       console.log(`Health check: http://localhost:${PORT}/health`);
       console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`Session timeout: ${getSessionTimeoutMs()}ms absolute, ${getSessionInactivityTimeoutMs()}ms inactivity`);
+      console.log(`Session cleanup interval: ${SESSION_CLEANUP_INTERVAL}ms`);
     });
   } catch (error) {
     console.error('Failed to start server:', error);
