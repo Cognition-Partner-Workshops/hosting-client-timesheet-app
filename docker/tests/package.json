@@ -1,0 +1,13 @@
+{
+  "name": "hosting-client-timesheet-app-tests",
+  "version": "1.0.0",
+  "description": "Automated tests for the hosting-client-timesheet-app",
+  "scripts": {
+    "test": "jest --coverage",
+    "test:watch": "jest --watch"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "sqlite3": "^5.1.7"
+  }
+}
