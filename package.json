@@ -1,0 +1,34 @@
+{
+  "name": "hosting-client-timesheet-app",
+  "version": "1.0.0",
+  "description": "Hosting configuration and tests for client timesheet application",
+  "main": "docker/overrides/server.js",
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:ci": "jest --coverage --ci --maxWorkers=2",
+    "lint": "echo 'No lint configured'",
+    "validate:terraform": "cd terraform/bootstrap && terraform validate && cd ../infrastructure && terraform validate"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.5",
+    "helmet": "^7.1.0",
+    "morgan": "^1.10.0",
+    "sqlite3": "^5.1.6"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^6.3.3"
+  },
+  "keywords": [
+    "hosting",
+    "timesheet",
+    "docker",
+    "terraform"
+  ],
+  "author": "",
+  "license": "MIT"
+}
