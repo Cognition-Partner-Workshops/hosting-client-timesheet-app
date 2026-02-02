@@ -25,9 +25,10 @@ usermod -aG docker ec2-user
 # Install AWS CLI (already installed on AL2023, but ensure it's available)
 dnf install -y aws-cli
 
-# Create app directory
+# Create app directory with proper permissions for container's nodejs user (UID 1001)
 mkdir -p /opt/app
 mkdir -p /opt/app/data
+chmod 777 /opt/app/data
 
 # Create deployment script
 cat > /opt/app/deploy.sh << 'DEPLOY_SCRIPT'
