@@ -9,11 +9,11 @@ terraform {
   }
 
   backend "s3" {
-    bucket         = "client-timesheet-terraform-state-599083837640"
-    key            = "infrastructure/terraform.tfstate"
-    region         = "us-east-1"
-    dynamodb_table = "client-timesheet-terraform-locks"
-    encrypt        = true
+    bucket       = "client-timesheet-terraform-state-599083837640"
+    key          = "infrastructure/terraform.tfstate"
+    region       = "us-east-1"
+    use_lockfile = true
+    encrypt      = true
   }
 }
 
