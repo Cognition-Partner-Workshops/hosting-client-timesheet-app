@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Build output
+bin/
+
+# Pulumi
+Pulumi.*.yaml
+!Pulumi.yaml
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store

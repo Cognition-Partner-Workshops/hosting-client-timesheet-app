@@ -1,0 +1,6 @@
+name: client-timesheet-infrastructure
+runtime: nodejs
+description: Main infrastructure for Client Timesheet App (EC2, Security Groups, EIP)
+config:
+  aws:region:
+    default: us-east-1

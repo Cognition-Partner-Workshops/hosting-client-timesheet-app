@@ -1,0 +1,6 @@
+name: client-timesheet-bootstrap
+runtime: nodejs
+description: Bootstrap infrastructure for Client Timesheet App (S3, DynamoDB, ECR, GitHub OIDC)
+config:
+  aws:region:
+    default: us-east-1
