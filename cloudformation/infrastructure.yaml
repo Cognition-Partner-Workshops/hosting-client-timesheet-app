@@ -4,6 +4,10 @@ Description: >
   Creates EC2 instance, security groups, IAM roles, and Elastic IP.
 
 Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID where resources will be created (use default VPC if unsure)
+
   Environment:
     Type: String
     Default: production
@@ -42,6 +46,7 @@ Resources:
     Properties:
       GroupName: client-timesheet-app-sg
       GroupDescription: Security group for Client Timesheet App
+      VpcId: !Ref VpcId
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 80

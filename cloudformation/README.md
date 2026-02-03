@@ -62,11 +62,16 @@ ECR_URL=$(aws cloudformation describe-stacks --stack-name client-timesheet-boots
 ECR_ARN=$(aws cloudformation describe-stacks --stack-name client-timesheet-bootstrap \
   --query 'Stacks[0].Outputs[?OutputKey==`ECRRepositoryArn`].OutputValue' --output text)
 
+# Get default VPC ID
+VPC_ID=$(aws ec2 describe-vpcs --filters "Name=isDefault,Values=true" \
+  --query 'Vpcs[0].VpcId' --output text)
+
 aws cloudformation create-stack \
   --stack-name client-timesheet-infrastructure \
   --template-body file://infrastructure.yaml \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameters \
+    ParameterKey=VpcId,ParameterValue=$VPC_ID \
     ParameterKey=ECRRepositoryUrl,ParameterValue=$ECR_URL \
     ParameterKey=ECRRepositoryArn,ParameterValue=$ECR_ARN
 ```
@@ -92,6 +97,7 @@ aws cloudformation update-stack \
   --template-body file://infrastructure.yaml \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameters \
+    ParameterKey=VpcId,UsePreviousValue=true \
     ParameterKey=ECRRepositoryUrl,UsePreviousValue=true \
     ParameterKey=ECRRepositoryArn,UsePreviousValue=true
 ```
