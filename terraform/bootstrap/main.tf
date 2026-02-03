@@ -1,3 +1,30 @@
+# =============================================================================
+# Client Timesheet Application - Bootstrap Module
+# =============================================================================
+#
+# This Terraform module creates foundational AWS resources that support the
+# infrastructure deployment pipeline. It should be applied ONCE before the
+# infrastructure module and rarely needs modification afterward.
+#
+# Resources Created:
+#   - S3 bucket for Terraform remote state storage
+#   - DynamoDB table for Terraform state locking
+#   - ECR repository for Docker image storage
+#   - GitHub Actions OIDC provider for secure CI/CD authentication
+#   - IAM role with least-privilege permissions for deployments
+#
+# Why Separate from Infrastructure:
+#   Bootstrap resources support Terraform itself (state storage) and must
+#   exist before other infrastructure can be provisioned. Keeping them
+#   separate allows independent lifecycle management.
+#
+# Usage:
+#   cd terraform/bootstrap
+#   terraform init
+#   terraform apply
+#
+# =============================================================================
+
 terraform {
   required_version = ">= 1.0"
 
@@ -13,8 +40,10 @@ provider "aws" {
   region = var.aws_region
 }
 
+# Current AWS account ID used for resource naming and ARN construction
 data "aws_caller_identity" "current" {}
 
+# Common tags applied to all resources for cost tracking and organization
 locals {
   account_id = data.aws_caller_identity.current.account_id
   tags = {
@@ -27,6 +56,10 @@ locals {
 # =============================================================================
 # Terraform State Backend Resources
 # =============================================================================
+# S3 bucket and DynamoDB table provide remote state management with:
+#   - Versioning for state history and recovery
+#   - Encryption at rest for security
+#   - Locking to prevent concurrent modifications
 
 resource "aws_s3_bucket" "terraform_state" {
   bucket = "client-timesheet-terraform-state-${local.account_id}"
@@ -48,10 +81,17 @@ resource "aws_s3_bucket_versioning" "terraform_state" {
 }
 
 # =============================================================================
-# GitHub Actions OIDC Provider and Deployment Role (Least Privilege)
+# GitHub Actions OIDC Provider and Deployment Role
 # =============================================================================
+# OIDC (OpenID Connect) enables GitHub Actions to authenticate with AWS
+# without storing long-lived credentials. The workflow receives a short-lived
+# JWT token that AWS validates against the OIDC provider.
+#
+# Security Benefits:
+#   - No static AWS access keys stored in GitHub secrets
+#   - Tokens are short-lived and automatically rotated
+#   - Trust is scoped to specific GitHub repository
 
-# OIDC Provider for GitHub Actions
 resource "aws_iam_openid_connect_provider" "github_actions" {
   url = "https://token.actions.githubusercontent.com"
 
@@ -65,7 +105,8 @@ resource "aws_iam_openid_connect_provider" "github_actions" {
   })
 }
 
-# IAM Role for GitHub Actions CD Pipeline (Least Privilege)
+# IAM Role assumed by GitHub Actions workflows via OIDC
+# Trust policy restricts assumption to the specific GitHub repository
 resource "aws_iam_role" "github_actions_deploy" {
   name = "client-timesheet-github-actions-deploy"
 
@@ -95,7 +136,8 @@ resource "aws_iam_role" "github_actions_deploy" {
   })
 }
 
-# ECR Push/Pull Policy (scoped to specific repository)
+# ECR Push/Pull Policy - allows CI/CD to build and push Docker images
+# Scoped to the specific ECR repository for least-privilege security
 resource "aws_iam_role_policy" "github_actions_ecr" {
   name = "ecr-push-pull"
   role = aws_iam_role.github_actions_deploy.id
@@ -104,9 +146,9 @@ resource "aws_iam_role_policy" "github_actions_ecr" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "ECRGetAuthToken"
-        Effect = "Allow"
-        Action = ["ecr:GetAuthorizationToken"]
+        Sid      = "ECRGetAuthToken"
+        Effect   = "Allow"
+        Action   = ["ecr:GetAuthorizationToken"]
         Resource = "*"
       },
       {
@@ -127,7 +169,8 @@ resource "aws_iam_role_policy" "github_actions_ecr" {
   })
 }
 
-# EC2 Describe Policy (for getting instance ID by tag)
+# EC2 Describe Policy - allows CI/CD to find the target instance by tag
+# Required for SSM deployment commands to identify the correct instance
 resource "aws_iam_role_policy" "github_actions_ec2" {
   name = "ec2-describe"
   role = aws_iam_role.github_actions_deploy.id
@@ -160,7 +203,8 @@ resource "aws_iam_role_policy" "github_actions_ec2" {
   })
 }
 
-# SSM Send Command Policy (for deployment via Systems Manager)
+# SSM Send Command Policy - enables remote deployment execution
+# Allows CI/CD to trigger the deploy.sh script on the EC2 instance
 resource "aws_iam_role_policy" "github_actions_ssm" {
   name = "ssm-send-command"
   role = aws_iam_role.github_actions_deploy.id
@@ -233,6 +277,8 @@ resource "aws_dynamodb_table" "terraform_locks" {
 # =============================================================================
 # ECR Repository
 # =============================================================================
+# Elastic Container Registry stores Docker images built by the CI/CD pipeline.
+# Images are tagged with 'latest' and pulled by the EC2 instance during deployment.
 
 resource "aws_ecr_repository" "app" {
   name                 = "client-timesheet-app"
@@ -257,9 +303,9 @@ resource "aws_ecr_lifecycle_policy" "app" {
         rulePriority = 1
         description  = "Keep last 10 images"
         selection = {
-          tagStatus     = "any"
-          countType     = "imageCountMoreThan"
-          countNumber   = 10
+          tagStatus   = "any"
+          countType   = "imageCountMoreThan"
+          countNumber = 10
         }
         action = {
           type = "expire"
