@@ -1,0 +1,51 @@
+{
+  "name": "hosting-client-timesheet-app-tests",
+  "version": "1.0.0",
+  "description": "Unit tests for hosting-client-timesheet-app overrides",
+  "scripts": {
+    "test": "jest",
+    "test:coverage": "jest --coverage",
+    "test:watch": "jest --watch"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^6.3.3"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",
+    "morgan": "^1.10.0",
+    "express-rate-limit": "^7.1.5",
+    "sqlite3": "^5.1.7"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "coverageDirectory": "coverage",
+    "collectCoverageFrom": [
+      "database/**/*.js",
+      "!**/node_modules/**",
+      "!**/coverage/**",
+      "!**/__tests__/**"
+    ],
+    "coverageReporters": [
+      "text",
+      "text-summary",
+      "lcov",
+      "html"
+    ],
+    "coverageThreshold": {
+      "global": {
+        "branches": 40,
+        "functions": 50,
+        "lines": 40,
+        "statements": 40
+      }
+    },
+    "testMatch": [
+      "**/__tests__/**/*.js",
+      "**/*.test.js"
+    ],
+    "verbose": true
+  }
+}
