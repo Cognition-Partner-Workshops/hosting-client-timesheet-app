@@ -1,0 +1,201 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Bootstrap resources for Client Timesheet App.
+  Creates GitHub Actions OIDC provider, IAM roles for deployment, and ECR repository.
+
+Parameters:
+  GitHubOrg:
+    Type: String
+    Default: Cognition-Partner-Workshops
+    Description: GitHub organization name for OIDC trust policy
+
+  GitHubRepo:
+    Type: String
+    Default: hosting-client-timesheet-app
+    Description: GitHub repository name for OIDC trust policy
+
+  Environment:
+    Type: String
+    Default: shared
+    Description: Environment name for tagging
+
+Resources:
+  GitHubActionsOIDCProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+      Tags:
+        - Key: Name
+          Value: GitHub Actions OIDC Provider
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: client-timesheet-app
+        - Key: ManagedBy
+          Value: cloudformation-bootstrap
+
+  GitHubActionsDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: client-timesheet-github-actions-deploy
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !GetAtt GitHubActionsOIDCProvider.Arn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub 'repo:${GitHubOrg}/${GitHubRepo}:*'
+      Tags:
+        - Key: Name
+          Value: GitHub Actions Deploy Role
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: client-timesheet-app
+        - Key: ManagedBy
+          Value: cloudformation-bootstrap
+
+  GitHubActionsECRPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: ecr-push-pull
+      Roles:
+        - !Ref GitHubActionsDeployRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: ECRGetAuthToken
+            Effect: Allow
+            Action:
+              - ecr:GetAuthorizationToken
+            Resource: '*'
+          - Sid: ECRPushPull
+            Effect: Allow
+            Action:
+              - ecr:BatchCheckLayerAvailability
+              - ecr:GetDownloadUrlForLayer
+              - ecr:BatchGetImage
+              - ecr:PutImage
+              - ecr:InitiateLayerUpload
+              - ecr:UploadLayerPart
+              - ecr:CompleteLayerUpload
+            Resource: !GetAtt ECRRepository.Arn
+
+  GitHubActionsEC2Policy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: ec2-describe
+      Roles:
+        - !Ref GitHubActionsDeployRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EC2DescribeAll
+            Effect: Allow
+            Action:
+              - ec2:DescribeInstances
+            Resource: '*'
+
+  GitHubActionsSSMPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: ssm-send-command
+      Roles:
+        - !Ref GitHubActionsDeployRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: SSMSendCommand
+            Effect: Allow
+            Action:
+              - ssm:SendCommand
+            Resource:
+              - !Sub 'arn:aws:ssm:${AWS::Region}::document/AWS-RunShellScript'
+              - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*'
+            Condition:
+              StringEquals:
+                ssm:resourceTag/Project: client-timesheet-app
+          - Sid: SSMGetCommandInvocation
+            Effect: Allow
+            Action:
+              - ssm:GetCommandInvocation
+            Resource: '*'
+
+  ECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: client-timesheet-app
+      ImageTagMutability: MUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last 10 images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+      Tags:
+        - Key: Name
+          Value: Client Timesheet App ECR
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: client-timesheet-app
+        - Key: ManagedBy
+          Value: cloudformation-bootstrap
+
+Outputs:
+  ECRRepositoryUrl:
+    Description: ECR repository URL for the application
+    Value: !GetAtt ECRRepository.RepositoryUri
+    Export:
+      Name: !Sub '${AWS::StackName}-ECRRepositoryUrl'
+
+  ECRRepositoryArn:
+    Description: ECR repository ARN
+    Value: !GetAtt ECRRepository.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-ECRRepositoryArn'
+
+  ECRRepositoryName:
+    Description: ECR repository name
+    Value: !Ref ECRRepository
+    Export:
+      Name: !Sub '${AWS::StackName}-ECRRepositoryName'
+
+  GitHubActionsRoleArn:
+    Description: IAM Role ARN for GitHub Actions to assume via OIDC
+    Value: !GetAtt GitHubActionsDeployRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-GitHubActionsRoleArn'
+
+  GitHubActionsOIDCProviderArn:
+    Description: GitHub Actions OIDC Provider ARN
+    Value: !GetAtt GitHubActionsOIDCProvider.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-GitHubActionsOIDCProviderArn'
+
+  AWSAccountId:
+    Description: AWS Account ID
+    Value: !Ref AWS::AccountId
