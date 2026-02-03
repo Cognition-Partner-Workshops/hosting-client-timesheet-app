@@ -50,7 +50,8 @@ jobs:
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: docker/Dockerfile
-          failure-threshold: warning
+          failure-threshold: error
+          ignore: DL3018
 
   docker-build:
     name: Docker Build Test
