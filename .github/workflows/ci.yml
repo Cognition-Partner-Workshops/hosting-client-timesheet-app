@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'devin/**'
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  terraform-validate:
+    name: Terraform Validation
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        directory:
+          - terraform/bootstrap
+          - terraform/infrastructure
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+
+      - name: Terraform Format Check
+        working-directory: ${{ matrix.directory }}
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Init
+        working-directory: ${{ matrix.directory }}
+        run: terraform init -backend=false
+
+      - name: Terraform Validate
+        working-directory: ${{ matrix.directory }}
+        run: terraform validate
+
+  dockerfile-lint:
+    name: Dockerfile Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: docker/Dockerfile
+          failure-threshold: warning
+
+  docker-build:
+    name: Docker Build Test
+    runs-on: ubuntu-latest
+    needs: dockerfile-lint
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Checkout application code
+        uses: actions/checkout@v4
+        with:
+          repository: Cognition-Partner-Workshops/client-timesheet-app
+          path: app-source
+
+      - name: Prepare build context
+        run: |
+          cp -r app-source/frontend ./frontend
+          cp -r app-source/backend ./backend
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: false
+          tags: client-timesheet-app:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: '.'
+          format: 'table'
+          exit-code: '0'
+          severity: 'CRITICAL,HIGH'
