@@ -1,0 +1,6 @@
+name: client-timesheet-bootstrap
+runtime:
+  name: nodejs
+  options:
+    typescript: true
+description: Bootstrap infrastructure for Client Timesheet App - creates S3 bucket for state, DynamoDB for locks, ECR repository, and GitHub Actions OIDC provider with IAM role

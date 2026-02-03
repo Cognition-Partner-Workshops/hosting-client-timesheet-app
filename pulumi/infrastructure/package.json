@@ -1,0 +1,21 @@
+{
+  "name": "client-timesheet-infrastructure",
+  "version": "1.0.0",
+  "description": "Application infrastructure for Client Timesheet App (EC2, VPC, Security Groups)",
+  "main": "index.ts",
+  "scripts": {
+    "build": "tsc",
+    "lint": "eslint src --ext .ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "eslint": "^8.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0"
+  },
+  "dependencies": {
+    "@pulumi/pulumi": "^3.0.0",
+    "@pulumi/aws": "^6.0.0"
+  }
+}

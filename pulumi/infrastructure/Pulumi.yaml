@@ -1,0 +1,6 @@
+name: client-timesheet-infrastructure
+runtime:
+  name: nodejs
+  options:
+    typescript: true
+description: Application infrastructure for Client Timesheet App - creates EC2 instance, security groups, IAM roles, and Elastic IP
