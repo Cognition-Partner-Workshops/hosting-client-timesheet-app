@@ -23,7 +23,13 @@ WORKDIR /app/backend
 # Copy backend package files
 COPY backend/package*.json ./
 
-# Install production dependencies only
+# Copy security overrides for npm packages
+COPY docker/overrides/package-overrides.json ./
+
+# Merge npm overrides into package.json to fix security vulnerabilities (jws, qs)
+RUN node -e "const pkg = require('./package.json'); const overrides = require('./package-overrides.json'); pkg.overrides = overrides.overrides; require('fs').writeFileSync('./package.json', JSON.stringify(pkg, null, 2));"
+
+# Install production dependencies only (with security overrides applied)
 RUN npm ci --only=production
 
 # Production stage
