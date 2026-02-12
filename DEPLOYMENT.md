@@ -209,7 +209,14 @@ cd terraform/infrastructure
 
 ### Step 6.2: Update the S3 backend configuration
 
-Before initializing, verify the S3 backend bucket in `main.tf` matches the one created during bootstrap. Open `main.tf` and confirm the `backend "s3"` block has the correct bucket name:
+The `main.tf` file contains a hardcoded S3 backend bucket name that includes the original AWS account ID. You **must edit** this to match your own account. Open `main.tf` and update the `backend "s3"` block:
+
+```bash
+# Get your AWS account ID
+aws sts get-caller-identity --query Account --output text
+```
+
+Then edit `main.tf` and replace the bucket name:
 
 ```hcl
 backend "s3" {
@@ -220,6 +227,8 @@ backend "s3" {
   encrypt        = true
 }
 ```
+
+Replace `<YOUR_ACCOUNT_ID>` with the account ID from the command above (e.g., `client-timesheet-terraform-state-123456789012`).
 
 ### Step 6.3: Initialize Terraform
 
@@ -278,26 +287,32 @@ Save this IP. The application URL will be `http://<ELASTIC_IP>`.
 
 The EC2 instance is now running, but you need to build and push a Docker image to ECR so the instance can pull and run it.
 
-First, you need the application source code. The Docker build expects `frontend/` and `backend/` directories from the companion app repository:
+First, you need the application source code. The Docker build expects `frontend/` and `backend/` directories from the companion app repository. The Dockerfile also references `docker/overrides/` from the hosting repo, so you need to set up a combined build context:
 
 ```bash
 cd ../..
 
-# Clone the application source code
-git clone https://github.com/Cognition-Partner-Workshops/client-timesheet-app.git /tmp/client-timesheet-app
+# Clone the application source code into a temporary build directory
+git clone https://github.com/Cognition-Partner-Workshops/client-timesheet-app.git /tmp/client-timesheet-build
+
+# Copy the Docker overrides from the hosting repo into the build context
+cp -r docker /tmp/client-timesheet-build/docker
 ```
 
 Now build and push the Docker image:
 
 ```bash
-# Authenticate Docker to ECR
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $TF_VAR_ecr_repository_url
+# Extract the ECR registry domain (without the repository path) for Docker login
+ECR_REGISTRY=$(echo $TF_VAR_ecr_repository_url | cut -d'/' -f1)
 
-# Build the Docker image (from the app repo, using the hosting repo's Docker config)
+# Authenticate Docker to ECR
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $ECR_REGISTRY
+
+# Build the Docker image from the combined build context
 docker build \
-  -f docker/Dockerfile \
+  -f /tmp/client-timesheet-build/docker/Dockerfile \
   -t client-timesheet-app:latest \
-  /tmp/client-timesheet-app
+  /tmp/client-timesheet-build
 
 # Tag and push to ECR
 docker tag client-timesheet-app:latest $TF_VAR_ecr_repository_url:latest
@@ -376,7 +391,14 @@ cd terraform/serverless
 
 ### Step 7.2: Update the S3 backend configuration
 
-Verify the S3 backend bucket in `main.tf` matches the one created during bootstrap (same as EC2 mode, but with a different state key):
+Just like in Step 6.2, you **must edit** the `main.tf` file to replace the hardcoded S3 bucket name with your own account ID:
+
+```bash
+# Get your AWS account ID (if you haven't already)
+aws sts get-caller-identity --query Account --output text
+```
+
+Edit `main.tf` and update the `backend "s3"` block:
 
 ```hcl
 backend "s3" {
@@ -388,17 +410,23 @@ backend "s3" {
 }
 ```
 
-### Step 7.3: Create a Lambda placeholder
+Replace `<YOUR_ACCOUNT_ID>` with your actual AWS account ID.
 
-Terraform needs a placeholder zip file for the initial Lambda function creation:
+### Step 7.3: Verify the Lambda placeholder exists
+
+Terraform needs a placeholder zip file for the initial Lambda function creation. This file (`lambda-placeholder.zip`) is already included in the repository under `terraform/serverless/`. Verify it exists:
 
 ```bash
-echo "exports.handler = async () => ({ statusCode: 200, body: 'placeholder' });" > /tmp/placeholder.js
-cd terraform/serverless
-zip lambda-placeholder.zip /tmp/placeholder.js
+ls -la lambda-placeholder.zip
 ```
 
-> **Note**: If `lambda-placeholder.zip` already exists in the `terraform/serverless/` directory, skip this step.
+If it is missing for any reason, create it:
+
+```bash
+echo 'exports.handler = async () => ({ statusCode: 200, body: "placeholder" });' > placeholder.js
+zip lambda-placeholder.zip placeholder.js
+rm placeholder.js
+```
 
 ### Step 7.4: Initialize Terraform
 
