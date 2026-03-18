@@ -1,3 +1,20 @@
+/**
+ * Production Express server for the Client Timesheet App.
+ *
+ * This file replaces the original development server when the application is
+ * packaged inside a Docker container. Key differences from the development
+ * server:
+ *
+ *   - Serves the React SPA as static files (in production mode)
+ *   - Uses file-based SQLite (via DATABASE_PATH env var) for data persistence
+ *   - Adds rate limiting, HTTP logging (morgan), and stricter CSP headers
+ *
+ * The server auto-initialises the SQLite database on startup and listens on
+ * the port specified by the PORT environment variable (default 3001).
+ *
+ * @module server
+ */
+
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -16,8 +33,9 @@ const { errorHandler } = require('./middleware/errorHandler');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Security middleware with CSP configured for React SPA
-// Note: HSTS and upgrade-insecure-requests disabled since we serve HTTP without SSL
+// Security middleware with Content-Security-Policy tuned for the React SPA.
+// HSTS and upgrade-insecure-requests are disabled because the container serves
+// plain HTTP behind the host’s reverse proxy / load balancer.
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -35,57 +53,69 @@ app.use(helmet({
   strictTransportSecurity: false,
 }));
 
-// CORS configuration - in production, same origin so allow all
+// CORS — In production the API and SPA share the same origin, so `true`
+// reflects the request origin. In development we allow the Vite dev server.
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' ? true : (process.env.FRONTEND_URL || 'http://localhost:5173'),
   credentials: true
 }));
 
-// Rate limiting
+// Rate limiting — prevents abuse by capping each IP to 100 requests per
+// 15-minute window. Returns HTTP 429 when exceeded.
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 100
 });
 app.use(limiter);
 
-// Logging
+// HTTP request logging in Apache "combined" format for production visibility.
 app.use(morgan('combined'));
 
-// Body parsing
+// Body parsing — JSON payloads up to 10 MB, plus URL-encoded form data.
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Health check
+/**
+ * GET /health
+ * Lightweight health-check endpoint used by the Docker HEALTHCHECK directive
+ * and external monitors.
+ */
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
-// API Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/clients', clientRoutes);
-app.use('/api/work-entries', workEntryRoutes);
-app.use('/api/reports', reportRoutes);
+// --- API route mounting ---
+app.use('/api/auth', authRoutes);          // Authentication (login, profile)
+app.use('/api/clients', clientRoutes);      // Client CRUD
+app.use('/api/work-entries', workEntryRoutes); // Work-entry CRUD
+app.use('/api/reports', reportRoutes);      // Reporting / analytics
 
-// Error handling for API routes
+// Centralised error handler for all /api/* routes.
 app.use('/api', errorHandler);
 
-// Serve static files in production
+// In production the server doubles as a static file host for the React SPA
+// build output. The catch-all GET * ensures client-side routing works by
+// always returning index.html for non-API paths.
 if (process.env.NODE_ENV === 'production') {
   const publicPath = path.join(__dirname, '..', 'public');
   app.use(express.static(publicPath));
   
-  // Handle React routing - serve index.html for all non-API routes
   app.get('*', (req, res) => {
     res.sendFile(path.join(publicPath, 'index.html'));
   });
 } else {
-  // 404 handler for development
+  // Development-only 404 handler (the SPA is served by Vite in dev).
   app.use('*', (req, res) => {
     res.status(404).json({ error: 'Route not found' });
   });
 }
 
-// Initialize database and start server
+/**
+ * Initialises the SQLite database and starts the HTTP server.
+ * Exits with code 1 if database initialisation fails.
+ *
+ * @returns {Promise<void>}
+ */
 async function startServer() {
   try {
     await initializeDatabase();

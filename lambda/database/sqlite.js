@@ -1,13 +1,32 @@
 /**
- * SQLite database adapter for local development
- * Mirrors the DynamoDB interface for seamless switching
+ * SQLite database adapter for local development.
+ *
+ * Provides the same CRUD interface as the DynamoDB adapter (dynamodb.js) so the
+ * two backends can be swapped transparently via the abstraction layer (index.js).
+ *
+ * The database is created in-memory by default, meaning all data is lost when
+ * the process exits. This keeps local development simple and dependency-free.
+ *
+ * Tables and indexes are lazily initialised on first access (see
+ * {@link initializeDatabase}).
+ *
+ * @module database/sqlite
  */
 
 const sqlite3 = require('sqlite3').verbose();
 
+/** @type {import('sqlite3').Database|null} Singleton database connection. */
 let db = null;
+
+/** Whether the schema (tables + indexes) has already been created. */
 let initialized = false;
 
+/**
+ * Returns (and lazily creates) the singleton SQLite database connection.
+ * The database lives entirely in memory (:memory:).
+ *
+ * @returns {import('sqlite3').Database}
+ */
 function getDatabase() {
   if (!db) {
     db = new sqlite3.Database(':memory:', (err) => {
@@ -21,6 +40,12 @@ function getDatabase() {
   return db;
 }
 
+/**
+ * Creates the database schema (tables and indexes) if it hasn't been created
+ * yet. Safe to call multiple times — subsequent calls are no-ops.
+ *
+ * @returns {Promise<void>}
+ */
 async function initializeDatabase() {
   if (initialized) return;
   
@@ -28,6 +53,7 @@ async function initializeDatabase() {
   
   return new Promise((resolve, reject) => {
     database.serialize(() => {
+      // ---- users table ----
       database.run(`
         CREATE TABLE IF NOT EXISTS users (
           email TEXT PRIMARY KEY,
@@ -35,6 +61,7 @@ async function initializeDatabase() {
         )
       `);
 
+      // ---- clients table ----
       database.run(`
         CREATE TABLE IF NOT EXISTS clients (
           id TEXT PRIMARY KEY,
@@ -48,6 +75,7 @@ async function initializeDatabase() {
         )
       `);
 
+      // ---- work_entries table ----
       database.run(`
         CREATE TABLE IF NOT EXISTS work_entries (
           id TEXT PRIMARY KEY,
@@ -61,6 +89,7 @@ async function initializeDatabase() {
         )
       `);
 
+      // ---- indexes for query performance ----
       database.run(`CREATE INDEX IF NOT EXISTS idx_clients_user_email ON clients (user_email)`);
       database.run(`CREATE INDEX IF NOT EXISTS idx_work_entries_client_id ON work_entries (client_id)`);
       database.run(`CREATE INDEX IF NOT EXISTS idx_work_entries_user_email ON work_entries (user_email)`, () => {
@@ -71,6 +100,13 @@ async function initializeDatabase() {
   });
 }
 
+/**
+ * Generates a RFC 4122–style v4 UUID using Math.random().
+ * Suitable for local development; in production the DynamoDB adapter uses
+ * the `uuid` package instead.
+ *
+ * @returns {string} A lowercase UUID string (e.g. '550e8400-e29b-41d4-a716-446655440000').
+ */
 function generateId() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
     const r = Math.random() * 16 | 0;
@@ -79,7 +115,16 @@ function generateId() {
   });
 }
 
-// Users
+// ---------------------------------------------------------------------------
+// User operations
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetches a user by email.
+ *
+ * @param {string} email - The user's email address (primary key).
+ * @returns {Promise<object|undefined>} The user row, or undefined if not found.
+ */
 async function getUser(email) {
   await initializeDatabase();
   return new Promise((resolve, reject) => {
@@ -90,6 +135,13 @@ async function getUser(email) {
   });
 }
 
+/**
+ * Inserts a new user. Uses INSERT OR IGNORE so duplicate emails are silently
+ * skipped rather than throwing a constraint error.
+ *
+ * @param {string} email - The user's email address.
+ * @returns {Promise<object>} The created user object ({ email, created_at }).
+ */
 async function createUser(email) {
   await initializeDatabase();
   const created_at = new Date().toISOString();
@@ -101,7 +153,16 @@ async function createUser(email) {
   });
 }
 
-// Clients
+// ---------------------------------------------------------------------------
+// Client operations
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns all clients owned by the given user.
+ *
+ * @param {string} userEmail - Owner's email address.
+ * @returns {Promise<object[]>} Array of client rows (may be empty).
+ */
 async function getClientsByUser(userEmail) {
   await initializeDatabase();
   return new Promise((resolve, reject) => {
@@ -112,6 +173,12 @@ async function getClientsByUser(userEmail) {
   });
 }
 
+/**
+ * Fetches a single client by its unique ID.
+ *
+ * @param {string} id - Client UUID.
+ * @returns {Promise<object|undefined>} The client row, or undefined if not found.
+ */
 async function getClientById(id) {
   await initializeDatabase();
   return new Promise((resolve, reject) => {
@@ -122,6 +189,12 @@ async function getClientById(id) {
   });
 }
 
+/**
+ * Inserts a new client record.
+ *
+ * @param {object} data - Client fields (name, description, department, email, user_email).
+ * @returns {Promise<object>} The created client object including generated id and timestamps.
+ */
 async function createClient(data) {
   await initializeDatabase();
   const id = generateId();
@@ -149,6 +222,14 @@ async function createClient(data) {
   });
 }
 
+/**
+ * Partially updates a client record. Only the fields present in `data` are
+ * modified; `updated_at` is always refreshed. Returns the full updated row.
+ *
+ * @param {string} id   - Client UUID.
+ * @param {object} data - Fields to update (name, description, department, email).
+ * @returns {Promise<object>} The updated client row.
+ */
 async function updateClient(id, data) {
   await initializeDatabase();
   const updates = [];
@@ -171,6 +252,13 @@ async function updateClient(id, data) {
   });
 }
 
+/**
+ * Deletes a client and cascade-deletes all of its work entries.
+ * Operations are serialised so work entries are removed before the client.
+ *
+ * @param {string} id - Client UUID.
+ * @returns {Promise<void>}
+ */
 async function deleteClient(id) {
   await initializeDatabase();
   return new Promise((resolve, reject) => {
@@ -184,7 +272,16 @@ async function deleteClient(id) {
   });
 }
 
-// Work Entries
+// ---------------------------------------------------------------------------
+// Work-entry operations
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns all work entries belonging to the given user.
+ *
+ * @param {string} userEmail - Owner's email address.
+ * @returns {Promise<object[]>} Array of work-entry rows (may be empty).
+ */
 async function getWorkEntriesByUser(userEmail) {
   await initializeDatabase();
   return new Promise((resolve, reject) => {
@@ -195,6 +292,12 @@ async function getWorkEntriesByUser(userEmail) {
   });
 }
 
+/**
+ * Returns all work entries for a specific client.
+ *
+ * @param {string} clientId - Client UUID.
+ * @returns {Promise<object[]>} Array of work-entry rows (may be empty).
+ */
 async function getWorkEntriesByClient(clientId) {
   await initializeDatabase();
   return new Promise((resolve, reject) => {
@@ -205,6 +308,12 @@ async function getWorkEntriesByClient(clientId) {
   });
 }
 
+/**
+ * Fetches a single work entry by its unique ID.
+ *
+ * @param {string} id - Work-entry UUID.
+ * @returns {Promise<object|undefined>} The work-entry row, or undefined if not found.
+ */
 async function getWorkEntryById(id) {
   await initializeDatabase();
   return new Promise((resolve, reject) => {
@@ -215,6 +324,12 @@ async function getWorkEntryById(id) {
   });
 }
 
+/**
+ * Inserts a new work entry.
+ *
+ * @param {object} data - Entry fields (client_id, user_email, hours, description, date).
+ * @returns {Promise<object>} The created work-entry object including generated id and timestamps.
+ */
 async function createWorkEntry(data) {
   await initializeDatabase();
   const id = generateId();
@@ -242,6 +357,14 @@ async function createWorkEntry(data) {
   });
 }
 
+/**
+ * Partially updates a work entry. Only the fields present in `data` are
+ * modified; `updated_at` is always refreshed. Returns the full updated row.
+ *
+ * @param {string} id   - Work-entry UUID.
+ * @param {object} data - Fields to update (hours, description, date, client_id).
+ * @returns {Promise<object>} The updated work-entry row.
+ */
 async function updateWorkEntry(id, data) {
   await initializeDatabase();
   const updates = [];
@@ -264,6 +387,12 @@ async function updateWorkEntry(id, data) {
   });
 }
 
+/**
+ * Deletes a single work entry.
+ *
+ * @param {string} id - Work-entry UUID.
+ * @returns {Promise<void>}
+ */
 async function deleteWorkEntry(id) {
   await initializeDatabase();
   return new Promise((resolve, reject) => {

@@ -1,3 +1,17 @@
+/**
+ * DynamoDB database adapter for cloud deployments.
+ *
+ * Implements the same CRUD interface as the SQLite adapter (sqlite.js) so the
+ * two can be swapped transparently via the database abstraction layer (index.js).
+ *
+ * Table names are read from environment variables with sensible defaults:
+ *   - USERS_TABLE        (default: 'client-timesheet-app-users')
+ *   - CLIENTS_TABLE      (default: 'client-timesheet-app-clients')
+ *   - WORK_ENTRIES_TABLE  (default: 'client-timesheet-app-work-entries')
+ *
+ * @module database/dynamodb
+ */
+
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
 const { 
   DynamoDBDocumentClient, 
@@ -10,16 +24,28 @@ const {
 } = require('@aws-sdk/lib-dynamodb');
 const { v4: uuidv4 } = require('uuid');
 
+// Initialise the low-level DynamoDB client and wrap it with the higher-level
+// Document client, which marshals JavaScript types to/from DynamoDB attributes.
 const client = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(client);
 
+/** Mapping of logical table names to their DynamoDB table names. */
 const TABLES = {
   users: process.env.USERS_TABLE || 'client-timesheet-app-users',
   clients: process.env.CLIENTS_TABLE || 'client-timesheet-app-clients',
   workEntries: process.env.WORK_ENTRIES_TABLE || 'client-timesheet-app-work-entries'
 };
 
-// Users
+// ---------------------------------------------------------------------------
+// User operations
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetches a user record by primary key (email).
+ *
+ * @param {string} email - The user's email address.
+ * @returns {Promise<object|undefined>} The user item, or undefined if not found.
+ */
 async function getUser(email) {
   const result = await docClient.send(new GetCommand({
     TableName: TABLES.users,
@@ -28,6 +54,12 @@ async function getUser(email) {
   return result.Item;
 }
 
+/**
+ * Creates a new user record.
+ *
+ * @param {string} email - The user's email address (used as partition key).
+ * @returns {Promise<object>} The newly created user item.
+ */
 async function createUser(email) {
   const user = {
     email,
@@ -40,7 +72,17 @@ async function createUser(email) {
   return user;
 }
 
-// Clients
+// ---------------------------------------------------------------------------
+// Client operations
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns all clients owned by the given user.
+ * Uses the `user_email-index` GSI for an efficient query.
+ *
+ * @param {string} userEmail - Owner's email address.
+ * @returns {Promise<object[]>} Array of client items (may be empty).
+ */
 async function getClientsByUser(userEmail) {
   const result = await docClient.send(new QueryCommand({
     TableName: TABLES.clients,
@@ -51,6 +93,12 @@ async function getClientsByUser(userEmail) {
   return result.Items || [];
 }
 
+/**
+ * Fetches a single client by its unique ID.
+ *
+ * @param {string} id - Client UUID.
+ * @returns {Promise<object|undefined>} The client item, or undefined if not found.
+ */
 async function getClientById(id) {
   const result = await docClient.send(new GetCommand({
     TableName: TABLES.clients,
@@ -59,6 +107,12 @@ async function getClientById(id) {
   return result.Item;
 }
 
+/**
+ * Persists a new client record in DynamoDB.
+ *
+ * @param {object} data - Client fields (name, description, department, email, user_email).
+ * @returns {Promise<object>} The created client item including generated id and timestamps.
+ */
 async function createClient(data) {
   const client = {
     id: uuidv4(),
@@ -77,6 +131,17 @@ async function createClient(data) {
   return client;
 }
 
+/**
+ * Partially updates a client record. Only the fields present in `data` are
+ * modified; `updated_at` is always refreshed.
+ *
+ * Note: `name` is a DynamoDB reserved word, so it is aliased via
+ * ExpressionAttributeNames (#name).
+ *
+ * @param {string} id   - Client UUID.
+ * @param {object} data - Fields to update (name, description, department, email).
+ * @returns {Promise<object>} The full updated client item (ALL_NEW).
+ */
 async function updateClient(id, data) {
   const updateExpressions = [];
   const expressionAttributeNames = {};
@@ -114,19 +179,36 @@ async function updateClient(id, data) {
   return result.Attributes;
 }
 
+/**
+ * Deletes a client and all of its associated work entries.
+ * Work entries are removed first to avoid orphaned records.
+ *
+ * @param {string} id - Client UUID.
+ * @returns {Promise<void>}
+ */
 async function deleteClient(id) {
   await docClient.send(new DeleteCommand({
     TableName: TABLES.clients,
     Key: { id }
   }));
-  // Also delete associated work entries
+  // Cascade-delete associated work entries to prevent orphans
   const entries = await getWorkEntriesByClient(id);
   for (const entry of entries) {
     await deleteWorkEntry(entry.id);
   }
 }
 
-// Work Entries
+// ---------------------------------------------------------------------------
+// Work-entry operations
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns all work entries belonging to the given user.
+ * Uses the `user_email-index` GSI.
+ *
+ * @param {string} userEmail - Owner's email address.
+ * @returns {Promise<object[]>} Array of work-entry items (may be empty).
+ */
 async function getWorkEntriesByUser(userEmail) {
   const result = await docClient.send(new QueryCommand({
     TableName: TABLES.workEntries,
@@ -137,6 +219,13 @@ async function getWorkEntriesByUser(userEmail) {
   return result.Items || [];
 }
 
+/**
+ * Returns all work entries for a specific client.
+ * Uses the `client_id-index` GSI.
+ *
+ * @param {string} clientId - Client UUID.
+ * @returns {Promise<object[]>} Array of work-entry items (may be empty).
+ */
 async function getWorkEntriesByClient(clientId) {
   const result = await docClient.send(new QueryCommand({
     TableName: TABLES.workEntries,
@@ -147,6 +236,12 @@ async function getWorkEntriesByClient(clientId) {
   return result.Items || [];
 }
 
+/**
+ * Fetches a single work entry by its unique ID.
+ *
+ * @param {string} id - Work-entry UUID.
+ * @returns {Promise<object|undefined>} The work-entry item, or undefined if not found.
+ */
 async function getWorkEntryById(id) {
   const result = await docClient.send(new GetCommand({
     TableName: TABLES.workEntries,
@@ -155,6 +250,12 @@ async function getWorkEntryById(id) {
   return result.Item;
 }
 
+/**
+ * Persists a new work entry in DynamoDB.
+ *
+ * @param {object} data - Entry fields (client_id, user_email, hours, description, date).
+ * @returns {Promise<object>} The created work-entry item including generated id and timestamps.
+ */
 async function createWorkEntry(data) {
   const entry = {
     id: uuidv4(),
@@ -173,6 +274,17 @@ async function createWorkEntry(data) {
   return entry;
 }
 
+/**
+ * Partially updates a work entry. Only the fields present in `data` are
+ * modified; `updated_at` is always refreshed.
+ *
+ * Note: `date` is a DynamoDB reserved word, so it is aliased via
+ * ExpressionAttributeNames (#date) when included.
+ *
+ * @param {string} id   - Work-entry UUID.
+ * @param {object} data - Fields to update (hours, description, date, client_id).
+ * @returns {Promise<object>} The full updated work-entry item (ALL_NEW).
+ */
 async function updateWorkEntry(id, data) {
   const updateExpressions = [];
   const expressionAttributeValues = {};
@@ -208,6 +320,12 @@ async function updateWorkEntry(id, data) {
   return result.Attributes;
 }
 
+/**
+ * Deletes a single work entry.
+ *
+ * @param {string} id - Work-entry UUID.
+ * @returns {Promise<void>}
+ */
 async function deleteWorkEntry(id) {
   await docClient.send(new DeleteCommand({
     TableName: TABLES.workEntries,
